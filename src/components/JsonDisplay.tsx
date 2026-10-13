@@ -34,10 +34,6 @@ const JsonDisplay: React.FC<JsonDisplayProps> = ({
       delete toParse.param;
       delete toParse.signatureParam;
     }
-    if (result.actions?.[0] === 'LOGOUT') {
-      delete toParse.email;
-      delete toParse.signatureFormat;
-    }
     json = fixData(toParse);
   }
 

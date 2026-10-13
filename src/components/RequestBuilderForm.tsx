@@ -294,7 +294,6 @@ const RequestBuilderForm: React.FC<RequestBuilderFormProps> = ({
               value={form.signatureFormat ?? ''}
               label="Signature Format"
               onChange={e => handleChange('signatureFormat', e.target.value)}
-              disabled={form.actions?.[0] === 'LOGOUT'}
             >
               <MenuItem value="">Select format…</MenuItem>
               <MenuItem value="raw">raw</MenuItem>
@@ -313,7 +312,6 @@ const RequestBuilderForm: React.FC<RequestBuilderFormProps> = ({
             label="Require email"
             value={form.email ?? ''}
             onChange={e => handleChange('email', e.target.value)}
-            disabled={form.actions?.[0] === 'LOGOUT'}
             fullWidth
           />
           <Tooltip title={<Typography sx={{ whiteSpace: 'pre-line', fontSize: 12 }}>{HELP.email}</Typography>} arrow>

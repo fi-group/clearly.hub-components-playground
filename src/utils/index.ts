@@ -9,13 +9,13 @@ export const CONFIG: {
 export const HELP: Record<string, string> = {
   mode: 'Choose popup or redirect behavior.\n\nWhen choosing popup, the request will be sent in a new window. \n\nWhen choosing redirect, the request will be sent by navigating to the component URL.\n\nFor popup, the param and signatureParam fields will be ignored, since the data will be sent on a BroadcastChannel.',
   client_id: 'Client identifier used by the component. Must be registered on Clearly.HUB',
-  action: 'Action to perform:\n- SELECT_SUBSCRIPTION\n-REGISTER_RESOURCE\n...',
+  action: 'Action to perform:\n- SELECT_SUBSCRIPTION: let the user select a subscription to this app\n- SELECT_HUB: let the user select one of their hubs\n- REGISTER_RESOURCE: let the user register a data url as a resource',
   redirect_url: 'The redirect url of the request AND the redirect URI registered on Clearly.HUB where the components will send their result.\nMUST be registered as redirect Url on the API Config for this client_id on Clearly.HUB.',
   param: 'Name of the response data param (ignored for popup).\nDefaults to "data".',
   signatureParam: 'Name of the response signature param (ignored for popup). \nDefaults to "signature".',
-  signatureFormat: 'Choose payload signature format (raw/jwt).\nNot available for LOGOUT (always: "raw")\nDefaults to "raw".',
-  email: 'Email with which the user has to sign into the components. Can be used to force the user to sign in with a specific email.\n\n Disabled for LOGOUT action.',
-  state: 'CSRF/state token used to match responses and prevent replay attacks. For each request, a new random state should be generated and registered on the server side, then verified when receiving the response.',
+  signatureFormat: 'Choose payload signature format (raw/jwt).\nDefaults to "raw".\n\nA jwt result is only valid for 5 minutes.',
+  email: 'Email with which the user has to sign into the components. Can be used to force the user to sign in with a specific email.\n\nIf the user is signed in with another account, the component asks them to switch accounts.',
+  state: 'CSRF/state token used to match responses and prevent replay attacks. For each request, a new random state should be generated and registered on the server side, then verified when receiving the response.\n\nThe state comes back in the result as request.state.',
   resourceUrl: 'URL of the resource to register (only for REGISTER_RESOURCE).\nLeave empty otherwise.',
   resourceFormat: 'Format of the resource to register (only for REGISTER_RESOURCE).\nExamples: 3dtiles, wms, etc..',
 };
@@ -35,28 +35,32 @@ const pemToSpkiBytes = (pem: string): Uint8Array => {
   return bytes;
 }
 
+const base64UrlToBase64 = (value: string): string =>
+  value.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((value.length + 3) % 4);
+
+// Decodes the result of a component:
+// - raw format: the data is base64 encoded JSON
+// - jwt format: the data is a JWT, and the result is its (base64url encoded) payload
+// In both cases the result contains the original `request` and the `response`
+// of the component. A JWT payload also contains the standard claims (iss, iat, exp, jti).
+export const decodeResult = (data: string): Record<string, unknown> => {
+  const parts = data.split('.');
+  if (parts.length === 3) {
+    return JSON.parse(atob(base64UrlToBase64(parts[1])));
+  }
+  return JSON.parse(atob(data));
+};
+
+// The state that was sent with the request comes back in the result as request.state.
 export const verifyState = (
   data: string,
   sentState: string,
-  format: 'jwt' | 'raw' | '',
 ): boolean => {
-  if (format === 'jwt') {
-    try {
-      const payloadPart = data.split('.')[1];
-      if (!payloadPart) return false;
-      const payloadJson = atob(payloadPart.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((payloadPart.length + 3) % 4));
-      const payload = JSON.parse(payloadJson);
-      return payload.state === sentState;
-    } catch {
-      return false;
-    }
-  } else {
-    try {
-      const parsed = JSON.parse(atob(data));
-      return parsed.state === sentState;
-    } catch {
-      return false;
-    }
+  try {
+    const result = decodeResult(data) as { request?: { state?: string } };
+    return result.request?.state === sentState;
+  } catch {
+    return false;
   }
 };
 
@@ -80,9 +84,7 @@ export const verifySignature = async (
     if (!headerB64 || !payloadB64 || !signatureB64) return false;
     const signingInput = `${headerB64}.${payloadB64}`;
 
-    const sigReplaced = signatureB64
-      .replace(/-/g, '+')
-      .replace(/_/g, '/') + '==='.slice((signatureB64.length + 3) % 4);
+    const sigReplaced = base64UrlToBase64(signatureB64);
 
     signatureBytes = new Uint8Array(Array.from(atob(sigReplaced), c => c.charCodeAt(0)));
     dataBytes = new TextEncoder().encode(signingInput);

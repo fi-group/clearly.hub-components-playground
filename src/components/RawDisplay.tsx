@@ -1,7 +1,7 @@
 import { Divider, Paper, Typography, IconButton, Tooltip, Box } from "@mui/material"
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CheckIcon from '@mui/icons-material/Check';
-import { copyToClipboard, verifySignature, verifyState } from "../utils";
+import { copyToClipboard, decodeResult, verifySignature, verifyState } from "../utils";
 import { useEffect, useState } from "react";
 
 interface RawDisplayProps {
@@ -22,6 +22,7 @@ const RawDisplay: React.FC<RawDisplayProps> = ({
   const [stateValid, setStateValid] = useState<boolean | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [responseForat, setResponseFormat] = useState<string>('');
+  const [jwtExpiry, setJwtExpiry] = useState<{ at: Date; expired: boolean } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -29,6 +30,7 @@ const RawDisplay: React.FC<RawDisplayProps> = ({
       setResponseFormat('');
       setSigValid(null);
       setStateValid(null);
+      setJwtExpiry(null);
 
       if (!data) return;
       const format = form.signatureFormat || 'raw';
@@ -45,9 +47,14 @@ const RawDisplay: React.FC<RawDisplayProps> = ({
 
         setSigValid(valid);
         if (form.state) {
-          const sValid = verifyState(data, form.state, format);
+          const sValid = verifyState(data, form.state);
           if (!active) return;
           setStateValid(sValid);
+        }
+        if (format === 'jwt') {
+          const { exp } = decodeResult(data) as { exp?: number };
+          if (!active) return;
+          setJwtExpiry(exp ? { at: new Date(exp * 1000), expired: exp * 1000 <= Date.now() } : null);
         }
       } catch {
         // ignore
@@ -66,29 +73,40 @@ const RawDisplay: React.FC<RawDisplayProps> = ({
         Raw Display {responseForat ? `(${responseForat})` : ''}
       </Typography>
 
-      {stateValid && (
+      {stateValid !== null && (
         <Typography variant="subtitle2" sx={{ color: stateValid ? 'lightgreen' : 'red', mt: 2 }}>
           State is {stateValid ? 'VALID' : 'INVALID'}
-          {stateValid && (
-            <>
-              <br />
-              (request was sent by US)
-            </>
-          )}
+          <br />
+          {stateValid
+            ? '(request was sent by US)'
+            : '(request.state in the result does not match the state that was sent)'}
         </Typography>
       )}
-      {sigValid && (
-        <>
-          <Typography variant="subtitle2" sx={{ color: sigValid ? 'lightgreen' : 'red', mt: 1 }}>
-            Signature is {sigValid ? 'VALID ' : 'INVALID'}
-            {sigValid && (
-              <>
-                <br />
-                (response is sent by OUP)
-              </>
-            )}
-          </Typography>
-        </>
+      {data && sigValid !== null && stateValid === null && (
+        <Typography variant="subtitle2" sx={{ color: 'orange', mt: 2 }}>
+          State not checked
+          <br />
+          (no state was sent with the request)
+        </Typography>
+      )}
+      {sigValid !== null && (
+        <Typography variant="subtitle2" sx={{ color: sigValid ? 'lightgreen' : 'red', mt: 1 }}>
+          Signature is {sigValid ? 'VALID' : 'INVALID'}
+          <br />
+          {sigValid
+            ? '(response is sent by OUP)'
+            : '(the result was not signed with the Clearly.HUB key, or was changed)'}
+        </Typography>
+      )}
+      {jwtExpiry && (
+        <Typography
+          variant="subtitle2"
+          sx={{ color: jwtExpiry.expired ? 'red' : 'lightgreen', mt: 1 }}
+        >
+          JWT {jwtExpiry.expired ? 'EXPIRED at' : 'valid until'} {jwtExpiry.at.toLocaleTimeString()}
+          <br />
+          (a jwt result is only valid for 5 minutes)
+        </Typography>
       )}
 
       {

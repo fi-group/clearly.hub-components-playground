@@ -3,7 +3,7 @@ import RequestBuilderForm from "./components/RequestBuilderForm";
 import JsonDisplay from "./components/JsonDisplay";
 import RawDisplay from "./components/RawDisplay";
 import { useEffect, useState, useMemo } from "react";
-import { CONFIG, storeForm } from "./utils";
+import { CONFIG, decodeResult, storeForm } from "./utils";
 
 const App = (): React.ReactElement | null => {
   const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -36,9 +36,9 @@ const App = (): React.ReactElement | null => {
     let parsed: Record<string, unknown> = {};
 
     try {
-      parsed = JSON.parse(atob(fixedData || ''));
+      parsed = decodeResult(fixedData || '');
     } catch {
-      parsed = JSON.parse(atob(fixedData?.split('.')[1] || ''))
+      console.error('Could not decode the result of the component');
     }
 
     setReceivedData(fixedData);
@@ -54,14 +54,8 @@ const App = (): React.ReactElement | null => {
       delete payloadToSend.param;
       delete payloadToSend.signatureParam;
     }
-    if (payloadToSend.actions?.[0] === 'LOGOUT') {
-      delete payloadToSend.email;
-      delete payloadToSend.signatureFormat;
-    }
     switch (mode) {
       case 'popup': {
-        // omit email for logout action
-
         const requestBase64 = btoa(JSON.stringify(payloadToSend));
         const height = screen.availHeight;
         const popupWidth = 450;
