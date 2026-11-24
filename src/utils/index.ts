@@ -1,18 +1,53 @@
-export const CONFIG: {
+export type Environment = 'prod' | 'acc' | 'test' | 'local';
+
+export interface EnvironmentConfig {
   componentUrl: string;
   publicKeyUrl: string;
-} = {
-  componentUrl: 'https://hub.clearly.app/components',
-  publicKeyUrl: 'https://hub.clearly.app/.well-known/public-key.pem',
+  // Sign-in for the iframe mode
+  authUrl: string;
+}
+
+export const CONFIGS: Record<Environment, EnvironmentConfig> = {
+  prod: {
+    componentUrl: 'https://hub.clearly.app/components',
+    publicKeyUrl: 'https://hub.clearly.app/.well-known/public-key.pem',
+    authUrl: 'https://auth.clearly.app',
+  },
+  acc: {
+    componentUrl: 'https://acc-hub.clearly.app/components',
+    publicKeyUrl: 'https://acc-hub.clearly.app/.well-known/public-key.pem',
+    authUrl: 'https://acc-auth.clearly.app',
+  },
+  test: {
+    componentUrl: 'https://test-hub.clearly.app/components',
+    publicKeyUrl: 'https://test-hub.clearly.app/.well-known/public-key.pem',
+    authUrl: 'https://test-auth.clearly.app',
+  },
+  local: {
+    componentUrl: 'http://localhost:5173/components',
+    publicKeyUrl: 'http://localhost:4000/.well-known/public-key.pem',
+    authUrl: 'https://test-auth.clearly.app',
+  },
+};
+
+export const ENVIRONMENTS = Object.keys(CONFIGS) as Environment[];
+
+// The environment chosen in the form, also read by the popup window
+export const loadEnvironment = (): Environment => {
+  const stored = localStorage.getItem('playground-environment');
+  return ENVIRONMENTS.includes(stored as Environment) ? (stored as Environment) : 'test';
 };
 
 export const HELP: Record<string, string> = {
-  mode: 'Choose popup or redirect behavior.\n\nWhen choosing popup, the request will be sent in a new window. \n\nWhen choosing redirect, the request will be sent by navigating to the component URL.\n\nFor popup, the param and signatureParam fields will be ignored, since the data will be sent on a BroadcastChannel.',
+  mode: 'Choose popup, redirect or iframe behavior.\n\nWhen choosing popup, the request will be sent in a new window. \n\nWhen choosing redirect, the request will be sent by navigating to the component URL.\n\nWhen choosing iframe, the component is shown in a dialog on this page (display: iframe). It cannot sign in itself: it asks this page for the tokens of the signed-in person, so sign in first. The answer comes back by postMessage.\n\nFor popup and iframe, the param and signatureParam fields will be ignored.',
+  layout: 'Layout of the framed component (only for iframe).\n\nMinimal leaves out the Clearly.HUB header, footer and side panel.',
+  environment: 'Clearly.HUB environment to send the request to. Sets the component, public key and auth URLs.\n\nYou may need to sign in again after switching: a sign-in belongs to one auth URL.',
+  signIn: 'The iframe mode needs the tokens of a person signed in to your app. The playground signs in with the Client ID (authorization code flow with PKCE) and comes back to the Redirect URL.\n\nSign out goes back to the Redirect URL too, so register it as a sign-out URL as well.',
   client_id: 'Client identifier used by the component. Must be registered on Clearly.HUB',
   action: 'Action to perform:\n- SELECT_SUBSCRIPTION: let the user select a subscription to this app\n- SELECT_HUB: let the user select one of their hubs\n- REGISTER_RESOURCE: let the user register a data url as a resource',
   redirect_url: 'The redirect url of the request AND the redirect URI registered on Clearly.HUB where the components will send their result.\nMUST be registered as redirect Url on the API Config for this client_id on Clearly.HUB.',
-  param: 'Name of the response data param (ignored for popup).\nDefaults to "data".',
-  signatureParam: 'Name of the response signature param (ignored for popup). \nDefaults to "signature".',
+  param: 'Name of the response data param (ignored for popup and iframe).\nDefaults to "data".',
+  signatureParam: 'Name of the response signature param (ignored for popup and iframe). \nDefaults to "signature".',
   signatureFormat: 'Choose payload signature format (raw/jwt).\nDefaults to "raw".\n\nA jwt result is only valid for 5 minutes.',
   email: 'Email with which the user has to sign into the components. Can be used to force the user to sign in with a specific email.\n\nIf the user is signed in with another account, the component asks them to switch accounts.',
   state: 'CSRF/state token used to match responses and prevent replay attacks. For each request, a new random state should be generated and registered on the server side, then verified when receiving the response.\n\nThe state comes back in the result as request.state.',

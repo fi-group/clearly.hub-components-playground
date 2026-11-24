@@ -1,22 +1,32 @@
 import Box from "@mui/material/Box";
+import Alert from "@mui/material/Alert";
 import RequestBuilderForm from "./components/RequestBuilderForm";
 import JsonDisplay from "./components/JsonDisplay";
 import RawDisplay from "./components/RawDisplay";
-import { useEffect, useState, useMemo } from "react";
-import { CONFIG, decodeResult, storeForm } from "./utils";
+import ComponentFrame from "./components/ComponentFrame";
+import { useCallback, useEffect, useState, useMemo } from "react";
+import { CONFIGS, decodeResult, loadEnvironment, storeForm, type Environment } from "./utils";
+import { completeSignIn, decodeJwtPayload, getSignedIn, handOverSignInPopup, isSignInCallback, isSignInPopupCallback, signInWithPopup, signOut } from "./utils/auth";
+
+type Mode = 'redirect' | 'popup' | 'iframe';
+
+const storedMode = (): Mode => {
+  const stored = localStorage.getItem('playground-mode');
+  return stored === 'redirect' || stored === 'iframe' ? stored : 'popup';
+};
 
 const App = (): React.ReactElement | null => {
   const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
 
-  const [mode, setMode] = useState<'redirect' | 'popup'>(
-    localStorage.getItem('playground-mode') === 'redirect' ? 'redirect' : 'popup',
+  const [mode, setMode] = useState<Mode>(storedMode);
+  const [layout, setLayout] = useState<'default' | 'minimal'>(
+    localStorage.getItem('playground-layout') === 'minimal' ? 'minimal' : 'default',
   );
-
-  const [componentUrl, setComponentUrl] = useState<string>(() => CONFIG.componentUrl);
-  const [publicKeyUrl, setPublicKeyUrl] = useState<string>(() => CONFIG.publicKeyUrl);
+  const [environment, setEnvironment] = useState<Environment>(loadEnvironment);
+  const { componentUrl, publicKeyUrl, authUrl } = CONFIGS[environment];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [form, setForm] = useState<Record<string, any>>(
+  const [form, setFormState] = useState<Record<string, any>>(
     localStorage.getItem('playground-form')
       ? JSON.parse(localStorage.getItem('playground-form')!)
       : {
@@ -27,9 +37,51 @@ const App = (): React.ReactElement | null => {
   const [receivedParsedData, setReceivedParsedData] = useState<Record<string, unknown> | undefined>();
   const [receivedSignature, setReceivedSignature] = useState<string | undefined>();
 
-  const [checking, setChecking] = useState(true);
+  // A changed request makes the response shown so far stale
+  const setForm: typeof setFormState = useCallback((update) => {
+    setFormState(update);
+    setReceivedData(undefined);
+    setReceivedParsedData(undefined);
+    setReceivedSignature(undefined);
+  }, []);
 
-  const handleData = (data: string, signature?: string) => {
+  // Render nothing while the URL is being handled: a sign-in coming back to
+  // this window, or a popup that hands over its result and closes
+  const [checking, setChecking] = useState(() =>
+    isSignInCallback(urlParams) ||
+    isSignInPopupCallback(urlParams) ||
+    sessionStorage.getItem('playground-is-popup') === 'true',
+  );
+
+  // Component shown in an iframe, and the sign-in it gets its tokens from
+  const [frameUrl, setFrameUrl] = useState<string | undefined>();
+  const [signInVersion, setSignInVersion] = useState(0);
+  const [signInError, setSignInError] = useState<string | undefined>();
+  const signedInAs = useMemo(() => {
+    const tokens = getSignedIn(authUrl, form.client_id);
+    if (!tokens) return undefined;
+    const claims = tokens.idToken ? decodeJwtPayload(tokens.idToken) : undefined;
+    return (claims?.email as string | undefined) ?? (claims?.sub as string | undefined) ?? 'unknown';
+    // signInVersion: re-read after signing in
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUrl, form.client_id, signInVersion]);
+
+  // The request as it is sent in the current mode
+  const request = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const payload: Record<string, any> = { ...form };
+    if (mode !== 'redirect') {
+      delete payload.param;
+      delete payload.signatureParam;
+    }
+    if (mode === 'iframe') {
+      payload.display = 'iframe';
+      if (layout === 'minimal') payload.layout = 'minimal';
+    }
+    return payload;
+  }, [form, mode, layout]);
+
+  const handleData = useCallback((data: string, signature?: string) => {
     const fixedData = data?.replace(/ /g, '+');
     const fixedSignature = signature?.replace(/ /g, '+');
 
@@ -44,17 +96,18 @@ const App = (): React.ReactElement | null => {
     setReceivedData(fixedData);
     setReceivedParsedData(parsed);
     setReceivedSignature(fixedSignature);
-  };
+  }, []);
 
-  const sendRequest = (mode: 'redirect' | 'popup'): void => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const payload: Record<string, any> = { ...form };
-    const payloadToSend = { ...payload };
-    if (mode === 'popup') {
-      delete payloadToSend.param;
-      delete payloadToSend.signatureParam;
-    }
+  const closeFrame = useCallback(() => setFrameUrl(undefined), []);
+
+  const sendRequest = (mode: Mode): void => {
+    const payloadToSend = request;
     switch (mode) {
+      case 'iframe': {
+        const requestBase64 = btoa(JSON.stringify(payloadToSend));
+        setFrameUrl(`${componentUrl.replace(/\/$/, '')}/${requestBase64}`);
+        break;
+      }
       case 'popup': {
         const requestBase64 = btoa(JSON.stringify(payloadToSend));
         const height = screen.availHeight;
@@ -87,21 +140,41 @@ const App = (): React.ReactElement | null => {
       };
     }
     return () => channel.close();
-  }, []);
+  }, [handleData]);
 
 
   useEffect(() => {
     localStorage.setItem('playground-mode', mode);
-    localStorage.setItem('playground-component-url', componentUrl);
-    localStorage.setItem('playground-public-key-url', publicKeyUrl);
-  }, [mode, componentUrl, publicKeyUrl]);
+    localStorage.setItem('playground-layout', layout);
+    localStorage.setItem('playground-environment', environment);
+  }, [mode, layout, environment]);
 
   useEffect(() => {
-    setChecking(true);
     const params: Record<string, string> = {};
 
     for (const [key, value] of urlParams.entries()) {
       params[key] = value;
+    }
+
+    // The sign-in popup, back from the sign-in: hands over and closes
+    if (handOverSignInPopup(urlParams)) {
+      return;
+    }
+
+    // Back from the playground's own sign-in in this window (when the popup was blocked)
+    if (isSignInCallback(urlParams)) {
+      window.history.replaceState({}, '', window.location.pathname);
+      completeSignIn(urlParams)
+        .then(() => setSignInError(undefined))
+        .catch((error: Error) => {
+          console.error('Sign-in failed:', error);
+          setSignInError(`Sign-in failed: ${error.message}`);
+        })
+        .finally(() => {
+          setSignInVersion(v => v + 1);
+          setChecking(false);
+        });
+      return;
     }
 
     const requestPayload = params.request;
@@ -111,7 +184,6 @@ const App = (): React.ReactElement | null => {
       const payload = JSON.parse(atob(requestPayload));
       const base64 = btoa(JSON.stringify(payload));
 
-      setChecking(false);
       window.location.href = `${componentUrl.replace(/\/$/, '')}/${base64}`;
     } else {
       const dataParam = params[form.param] || params['data'];
@@ -132,17 +204,12 @@ const App = (): React.ReactElement | null => {
         Promise.resolve().then(() => handleData(dataParam, sigParam));
         window.history.replaceState({}, '', window.location.pathname);
       }
-      setChecking(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlParams]);
 
   useEffect(() => {
     storeForm(form);
-
-    setReceivedData(undefined);
-    setReceivedParsedData(undefined);
-    setReceivedSignature(undefined);
   }, [form]);
 
   if (urlParams.has('request')) {
@@ -153,7 +220,10 @@ const App = (): React.ReactElement | null => {
   }
 
   return (
-    <Box display="flex" flexDirection="row" gap={2} sx={{
+    <Box sx={{
+      display: 'flex',
+      flexDirection: 'row',
+      gap: 2,
       width: '100%',
       maxWidth: '100vw',
       height: '100vh',
@@ -161,24 +231,40 @@ const App = (): React.ReactElement | null => {
       p: 4,
       alignItems: 'flex-start',
     }}>
-      <Box flexGrow={0} sx={{ width: 375 }}>
+      <Box sx={{ flexGrow: 0, width: 375 }}>
+        {signInError && (
+          <Alert severity="error" onClose={() => setSignInError(undefined)} sx={{ mb: 2 }}>
+            {signInError}
+          </Alert>
+        )}
         <RequestBuilderForm
           form={form}
           setForm={setForm}
           mode={mode}
           setMode={setMode}
+          environment={environment}
+          setEnvironment={setEnvironment}
           componentUrl={componentUrl}
-          setComponentUrl={setComponentUrl}
           publicKeyUrl={publicKeyUrl}
-          setPublicKeyUrl={setPublicKeyUrl}
           onSubmit={sendRequest}
+          authUrl={authUrl}
+          layout={layout}
+          setLayout={setLayout}
+          signedInAs={signedInAs}
+          onSignIn={() => {
+            signInWithPopup(authUrl, form.client_id, form.redirect_url, (error) => {
+              setSignInError(error ? `Sign-in failed: ${error.message}` : undefined);
+              setSignInVersion(v => v + 1);
+            });
+          }}
+          onSignOut={() => signOut(authUrl, form.client_id, form.redirect_url)}
         />
       </Box>
-      <Box flex={1} display="flex" rowGap={2} flexDirection="column" sx={{ minWidth: 0 }}>
-        <JsonDisplay result={form} mode={mode} title="Request Payload" />
+      <Box sx={{ flex: 1, display: 'flex', rowGap: 2, flexDirection: 'column', minWidth: 0 }}>
+        <JsonDisplay result={request} mode={mode} title="Request Payload" />
         <JsonDisplay result={receivedParsedData} mode={mode} title="Response Payload" />
       </Box>
-      <Box flexGrow={0} sx={{ width: 300 }}>
+      <Box sx={{ flexGrow: 0, width: 300 }}>
         <RawDisplay
           data={receivedData}
           signature={receivedSignature}
@@ -186,6 +272,15 @@ const App = (): React.ReactElement | null => {
           publicKeyUrl={publicKeyUrl}
         />
       </Box>
+      <ComponentFrame
+        url={frameUrl}
+        componentUrl={componentUrl}
+        authUrl={authUrl}
+        clientId={form.client_id}
+        redirectUrl={form.redirect_url ?? ''}
+        onAnswer={handleData}
+        onClose={closeFrame}
+      />
     </Box>
   );
 }

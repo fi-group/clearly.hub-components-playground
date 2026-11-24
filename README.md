@@ -36,13 +36,20 @@ Opens the component in a new browser window. The response is returned to the mai
 ### Redirect
 Navigates the current page to the component URL. The component redirects back to the configured **Redirect URL** with the response encoded in query parameters.
 
+### Iframe
+Shows the component in a dialog on the playground page (`display: 'iframe'` in the request; choose **Layout** `minimal` to leave out the Clearly.HUB header, footer and side panel). A framed component can't sign in itself, so it asks the playground for the tokens of the signed-in person by `postMessage`, and posts its signed answer back the same way. The `param` and `signatureParam` fields are ignored in this mode.
+
+Sign in first with the **Sign in** button: the playground runs an authorization code flow with PKCE for the **Client ID** against the Auth URL of the chosen **Environment**, in a popup that comes back to the **Redirect URL**, hands the result to the playground and closes. If the browser blocks the popup, the sign-in happens in the playground window itself. So the Redirect URL must be the playground itself (e.g. [http://localhost:8080](http://localhost:8080)), registered as callback and sign-out URL. Without a sign-in, the component answers with an empty answer.
+
+The playground keeps these tokens in `sessionStorage`, to stay a standalone tool. A real app keeps them on its server and never hands the refresh token to the browser.
+
 ---
 
 ## Response Verification
 
 When a response is received, the Raw Display panel automatically:
 
-- **Verifies the Ed25519 signature** against the Clearly.HUB public key (`https://hub.clearly.app/.well-known/public-key.pem`)
+- **Verifies the Ed25519 signature** against the public key of the chosen **Environment** (for prod: `https://hub.clearly.app/.well-known/public-key.pem`)
 - **Verifies the state token** to confirm the response matches the original request (CSRF protection). The result contains the original request, so the state comes back as `request.state`.
 - **Shows the expiry** of a `jwt` result: a JWT result is only valid for 5 minutes.
 
@@ -54,7 +61,7 @@ In this playground the checks run in the browser, to make them easy to inspect. 
 
 ## Getting Started
 
-**Prerequisites:** Node.js 20.19+ or 22.12+ (required by Vite 7)
+**Prerequisites:** Node.js 20.19+ or 22.12+ (required by Vite 8)
 
 ```bash
 npm install

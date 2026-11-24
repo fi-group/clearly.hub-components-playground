@@ -16,39 +16,53 @@ import {
 } from '@mui/material';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { v4 as uuidv4 } from 'uuid';
-import { HELP } from '../utils';
+import { ENVIRONMENTS, HELP, type Environment } from '../utils';
 
 const ACTIONS = [
+  'SELECT_DIGITAL_TWIN',
   'SELECT_HUB',
+  'SELECT_RESOURCES',
   'SELECT_SUBSCRIPTION',
   'REGISTER_RESOURCE',
 ];
 
 interface RequestBuilderFormProps {
-  mode: 'redirect' | 'popup';
-  setMode: React.Dispatch<React.SetStateAction<'redirect' | 'popup'>>;
+  mode: 'redirect' | 'popup' | 'iframe';
+  setMode: React.Dispatch<React.SetStateAction<'redirect' | 'popup' | 'iframe'>>;
+  environment: Environment;
+  setEnvironment: React.Dispatch<React.SetStateAction<Environment>>;
   componentUrl: string;
-  setComponentUrl: React.Dispatch<React.SetStateAction<string>>;
   publicKeyUrl: string;
-  setPublicKeyUrl: React.Dispatch<React.SetStateAction<string>>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   form: Record<string, any>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setForm: React.Dispatch<React.SetStateAction<Record<string, any>>>;
-  onSubmit: (mode: 'redirect' | 'popup') => void;
+  onSubmit: (mode: 'redirect' | 'popup' | 'iframe') => void;
+  authUrl: string;
+  layout: 'default' | 'minimal';
+  setLayout: React.Dispatch<React.SetStateAction<'default' | 'minimal'>>;
+  // Who is signed in for the iframe mode, if anyone
+  signedInAs: string | undefined;
+  onSignIn: () => void;
+  onSignOut: () => void;
 }
 
 const RequestBuilderForm: React.FC<RequestBuilderFormProps> = ({
   mode,
   setMode,
+  environment,
+  setEnvironment,
   componentUrl,
-  setComponentUrl,
   publicKeyUrl,
-  setPublicKeyUrl,
   form,
   setForm,
   onSubmit,
+  authUrl,
+  layout,
+  setLayout,
+  signedInAs,
+  onSignIn,
+  onSignOut,
 }): React.ReactElement => {
   const handleChange = (field: string, value: unknown) => {
     if (field.includes('.')) {
@@ -83,8 +97,6 @@ const RequestBuilderForm: React.FC<RequestBuilderFormProps> = ({
           sx={{ mt: 2 }}
           onClick={() => { onSubmit(mode); }}
           disabled={
-            !componentUrl ||
-            !publicKeyUrl ||
             !form.actions?.[0] ||
             !form.client_id ||
             !form.redirect_url ||
@@ -101,10 +113,11 @@ const RequestBuilderForm: React.FC<RequestBuilderFormProps> = ({
               labelId="mode-label"
               value={mode}
               label="Mode"
-              onChange={e => setMode(e.target.value as 'redirect' | 'popup')}
+              onChange={e => setMode(e.target.value as 'redirect' | 'popup' | 'iframe')}
             >
               <MenuItem value="redirect">Redirect</MenuItem>
               <MenuItem value="popup">Popup</MenuItem>
+              <MenuItem value="iframe">Iframe</MenuItem>
             </Select>
           </FormControl>
           <Tooltip title={<Typography sx={{ whiteSpace: 'pre-line', fontSize: 12 }}>{HELP.mode}</Typography>} arrow>
@@ -113,6 +126,50 @@ const RequestBuilderForm: React.FC<RequestBuilderFormProps> = ({
             </IconButton>
           </Tooltip>
         </Box>
+
+        {mode === 'iframe' && (
+          <>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="body2" sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
+                {signedInAs ? <>Signed in as <b>{signedInAs}</b></> : 'Not signed in'}
+              </Typography>
+              {signedInAs ? (
+                <Button variant="outlined" size="small" onClick={onSignOut} disabled={!form.client_id || !form.redirect_url}>
+                  Sign out
+                </Button>
+              ) : (
+                <Button variant="outlined" size="small" onClick={onSignIn} disabled={!form.client_id || !form.redirect_url}>
+                  Sign in
+                </Button>
+              )}
+              <Tooltip title={<Typography sx={{ whiteSpace: 'pre-line', fontSize: 12 }}>{HELP.signIn}</Typography>} arrow>
+                <IconButton size="small" aria-label="sign-in-help">
+                  <InfoOutlinedIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <FormControl fullWidth>
+                <InputLabel id="layout-label">Layout</InputLabel>
+                <Select
+                  labelId="layout-label"
+                  value={layout}
+                  label="Layout"
+                  onChange={e => setLayout(e.target.value as 'default' | 'minimal')}
+                >
+                  <MenuItem value="default">default</MenuItem>
+                  <MenuItem value="minimal">minimal</MenuItem>
+                </Select>
+              </FormControl>
+              <Tooltip title={<Typography sx={{ whiteSpace: 'pre-line', fontSize: 12 }}>{HELP.layout}</Typography>} arrow>
+                <IconButton size="small" aria-label="layout-help">
+                  <InfoOutlinedIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          </>
+        )}
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <TextField
@@ -131,30 +188,42 @@ const RequestBuilderForm: React.FC<RequestBuilderFormProps> = ({
         </Box>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <TextField
-            label="Component URL"
-            value={componentUrl}
-            onChange={e => setComponentUrl(e.target.value)}
-            fullWidth
-            required
-            error={!componentUrl}
-            disabled
-          />
+          <FormControl fullWidth>
+            <InputLabel id="environment-label">Environment</InputLabel>
+            <Select
+              labelId="environment-label"
+              value={environment}
+              label="Environment"
+              onChange={e => setEnvironment(e.target.value as Environment)}
+            >
+              {ENVIRONMENTS.map(env => (
+                <MenuItem key={env} value={env}>{env}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <Tooltip title={<Typography sx={{ whiteSpace: 'pre-line', fontSize: 12 }}>{HELP.environment}</Typography>} arrow>
+            <IconButton size="small" aria-label="environment-help">
+              <InfoOutlinedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <TextField label="Component URL" value={componentUrl} fullWidth disabled />
           <Box component="span" aria-hidden="true" sx={{ width: 36, display: 'inline-block' }} />
         </Box>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <TextField
-            label="Public Key URL"
-            value={publicKeyUrl}
-            onChange={e => setPublicKeyUrl(e.target.value)}
-            fullWidth
-            required
-            error={!publicKeyUrl}
-            disabled
-          />
+          <TextField label="Public Key URL" value={publicKeyUrl} fullWidth disabled />
           <Box component="span" aria-hidden="true" sx={{ width: 36, display: 'inline-block' }} />
         </Box>
+
+        {mode === 'iframe' && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <TextField label="Auth URL" value={authUrl} fullWidth disabled />
+            <Box component="span" aria-hidden="true" sx={{ width: 36, display: 'inline-block' }} />
+          </Box>
+        )}
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <TextField
@@ -261,7 +330,7 @@ const RequestBuilderForm: React.FC<RequestBuilderFormProps> = ({
             label="Param"
             value={form.param ?? ''}
             onChange={e => handleChange('param', e.target.value)}
-            disabled={mode === 'popup'}
+            disabled={mode !== 'redirect'}
             fullWidth
           />
           <Tooltip title={<Typography sx={{ whiteSpace: 'pre-line', fontSize: 12 }}>{HELP.param}</Typography>} arrow>
@@ -276,7 +345,7 @@ const RequestBuilderForm: React.FC<RequestBuilderFormProps> = ({
             label="Sig Param"
             value={form.signatureParam ?? ''}
             onChange={e => handleChange('signatureParam', e.target.value)}
-            disabled={mode === 'popup'}
+            disabled={mode !== 'redirect'}
             fullWidth
           />
           <Tooltip title={<Typography sx={{ whiteSpace: 'pre-line', fontSize: 12 }}>{HELP.signatureParam}</Typography>} arrow>
@@ -327,20 +396,22 @@ const RequestBuilderForm: React.FC<RequestBuilderFormProps> = ({
             value={form.state ?? ''}
             onChange={e => handleChange('state', e.target.value)}
             fullWidth
-            InputProps={{
-              endAdornment: (
-                <InputAdornment position="end">
-                  <IconButton
-                    edge="end"
-                    size="small"
-                    onClick={() => handleChange('state', uuidv4())}
-                    title="Generate new state UUID"
-                    tabIndex={-1}
-                  >
-                    <RefreshIcon fontSize="small" />
-                  </IconButton>
-                </InputAdornment>
-              ),
+            slotProps={{
+              input: {
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton
+                      edge="end"
+                      size="small"
+                      onClick={() => handleChange('state', crypto.randomUUID())}
+                      title="Generate new state UUID"
+                      tabIndex={-1}
+                    >
+                      <RefreshIcon fontSize="small" />
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              },
             }}
           />
           <Tooltip title={<Typography sx={{ whiteSpace: 'pre-line', fontSize: 12 }}>{HELP.state}</Typography>} arrow>
